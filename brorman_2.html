@@ -1,0 +1,790 @@
+<!DOCTYPE html>
+<html lang="no">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>BROR-MAN</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
+
+  * { margin: 0; padding: 0; box-sizing: border-box; image-rendering: pixelated; }
+
+  body {
+    background: #0a0a0a;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    font-family: 'Press Start 2P', monospace;
+    overflow: hidden;
+  }
+
+  #title {
+    color: #f5c842;
+    font-size: 28px;
+    letter-spacing: 4px;
+    margin-bottom: 8px;
+    text-shadow: 4px 4px 0 #b8860b, 0 0 20px #f5c84288;
+    animation: titlePulse 2s ease-in-out infinite;
+  }
+
+  @keyframes titlePulse {
+    0%, 100% { text-shadow: 4px 4px 0 #b8860b, 0 0 20px #f5c84288; }
+    50% { text-shadow: 4px 4px 0 #b8860b, 0 0 40px #f5c842cc; }
+  }
+
+  #hud {
+    display: flex;
+    gap: 32px;
+    margin-bottom: 8px;
+    color: #fff;
+    font-size: 10px;
+  }
+
+  #hud span { color: #f5c842; }
+
+  #gameWrapper {
+    position: relative;
+    border: 4px solid #1a3a5c;
+    box-shadow: 0 0 0 4px #0d2035, 0 0 40px #0044aa44;
+  }
+
+  canvas { display: block; background: #000014; }
+
+  #overlay {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0,0,10,0.88);
+    color: #fff;
+    gap: 20px;
+  }
+
+  #overlay h2 {
+    font-size: 20px;
+    color: #f5c842;
+    text-shadow: 3px 3px 0 #b8860b;
+    text-align: center;
+    line-height: 1.8;
+  }
+
+  #overlay p {
+    font-size: 8px;
+    color: #aaa;
+    text-align: center;
+    line-height: 2;
+    max-width: 340px;
+  }
+
+  #startBtn {
+    background: #f5c842;
+    color: #000;
+    border: none;
+    font-family: 'Press Start 2P', monospace;
+    font-size: 11px;
+    padding: 14px 28px;
+    cursor: pointer;
+    animation: btnBlink 1s step-end infinite;
+  }
+
+  @keyframes btnBlink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
+  }
+
+  #lives-display { display: flex; gap: 8px; align-items: center; }
+  #footer {
+    margin-top: 8px;
+    color: #333;
+    font-size: 7px;
+    text-align: center;
+    line-height: 2;
+  }
+</style>
+</head>
+<body>
+
+<div id="title">🐾 BROR-MAN 🐾</div>
+<div id="hud">
+  <div>SCORE: <span id="scoreDisplay">0</span></div>
+  <div>LEVEL: <span id="levelDisplay">1</span></div>
+  <div id="lives-display">LIV: <span id="livesDisplay">❤️❤️❤️</span></div>
+</div>
+
+<div id="gameWrapper">
+  <canvas id="gameCanvas"></canvas>
+  <div id="overlay">
+    <h2>BROR-MAN</h2>
+    <p>Spis så mange tamponger, druer og takeaway-bokser du klarer før eierne dine fanger deg</p>
+    <button id="startBtn" onclick="startGame()">START SPILL</button>
+  </div>
+</div>
+
+<div id="footer">← → ↑ ↓  ELLER  W A S D &nbsp;|&nbsp; LAG AV KJÆRLIGHET TIL BROR</div>
+
+<script>
+const TILE = 20;
+const COLS = 21;
+const ROWS = 21;
+const W = COLS * TILE;
+const H = ROWS * TILE;
+
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+canvas.width = W;
+canvas.height = H;
+
+// Colors matching the dog
+const DOG_COLORS = {
+  fur: '#D4844A',
+  furLight: '#E8A870',
+  furDark: '#A85C28',
+  nose: '#C47878',
+  eye: '#5C3010',
+  eyeLight: '#8B4513',
+  white: '#F0E8D8',
+  mouth: '#8B4040'
+};
+
+// MAP: 1=wall, 0=dot, 2=empty, 3=power-pellet, 9=ghost-house
+const BASE_MAP = [
+  [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
+  [1,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,1],
+  [1,3,1,1,0,1,1,1,0,1,1,1,0,1,1,1,0,1,1,3,1],
+  [1,0,1,1,0,1,1,1,0,1,1,1,0,1,1,1,0,1,1,0,1],
+  [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+  [1,0,1,1,0,1,0,1,1,1,1,1,1,1,0,1,0,1,1,0,1],
+  [1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1],
+  [1,1,1,1,0,1,1,1,2,2,1,2,2,1,1,1,0,1,1,1,1],
+  [1,1,1,1,0,1,2,2,2,2,2,2,2,2,1,2,0,1,1,1,1],
+  [1,1,1,1,0,1,2,1,9,9,9,9,1,2,1,2,0,1,1,1,1],
+  [2,2,2,2,0,2,2,1,9,9,9,9,1,2,2,2,0,2,2,2,2],
+  [1,1,1,1,0,1,2,1,1,1,1,1,1,2,1,2,0,1,1,1,1],
+  [1,1,1,1,0,1,2,2,2,2,2,2,2,2,1,2,0,1,1,1,1],
+  [1,1,1,1,0,1,2,1,1,1,1,1,1,1,2,2,0,1,1,1,1],
+  [1,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,1],
+  [1,0,1,1,0,1,1,1,0,1,1,1,0,1,1,1,0,1,1,0,1],
+  [1,3,0,1,0,0,0,0,0,0,2,0,0,0,0,0,0,1,0,3,1],
+  [1,1,0,1,0,1,0,1,1,1,1,1,1,1,0,1,0,1,0,1,1],
+  [1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1],
+  [1,0,1,1,1,1,1,1,0,1,1,1,0,1,1,1,1,1,1,0,1],
+  [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
+];
+
+let map, score, lives, level, gameState, animFrame;
+let player, ghosts, items, powerTimer, scared;
+
+const ITEMS = ['🍇','📚','🪥','🥡','🛋️'];
+const GHOST_COLORS = ['#FF6B9D','#7B68EE'];
+const GHOST_NAMES = ['JULIE','MAREN'];
+
+function copyMap() {
+  return BASE_MAP.map(r => [...r]);
+}
+
+function countDots(m) {
+  let c = 0;
+  for (let r of m) for (let v of r) if (v === 0 || v === 3) c++;
+  return c;
+}
+
+function startGame() {
+  document.getElementById('overlay').style.display = 'none';
+  map = copyMap();
+  score = 0;
+  lives = 3;
+  level = 1;
+  gameState = 'playing';
+  scared = false;
+  powerTimer = 0;
+  initEntities();
+  if (animFrame) cancelAnimationFrame(animFrame);
+  gameLoop();
+}
+
+function initEntities() {
+  player = {
+    x: 10, y: 16,
+    dx: 0, dy: 0,
+    nextDx: 0, nextDy: 0,
+    px: 10 * TILE, py: 16 * TILE,
+    mouthAngle: 0,
+    mouthDir: 1,
+    facing: 0,
+    moveTimer: 0,
+    speed: 3
+  };
+
+  ghosts = [
+    { x: 9, y: 9, px: 9*TILE+2, py: 9*TILE+2, dx: 1, dy: 0, color: GHOST_COLORS[0], name: GHOST_NAMES[0], scatterTimer: 0, moveTimer: 0, speed: 2.5 + level * 0.2 },
+    { x: 11, y: 9, px: 11*TILE+2, py: 9*TILE+2, dx: -1, dy: 0, color: GHOST_COLORS[1], name: GHOST_NAMES[1], scatterTimer: 0, moveTimer: 0, speed: 2.5 + level * 0.2 }
+  ];
+
+  items = [];
+  // Place items on dots
+  let placed = 0;
+  const positions = [];
+  for (let row = 0; row < ROWS; row++) {
+    for (let col = 0; col < COLS; col++) {
+      if (map[row][col] === 0) positions.push({row, col});
+    }
+  }
+  // shuffle
+  for (let i = positions.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i+1));
+    [positions[i], positions[j]] = [positions[j], positions[i]];
+  }
+  // place 8 items over dots
+  for (let i = 0; i < Math.min(8, positions.length); i++) {
+    items.push({ x: positions[i].col, y: positions[i].row, emoji: ITEMS[i % ITEMS.length], collected: false });
+    map[positions[i].row][positions[i].col] = 2; // remove dot under it
+  }
+}
+
+let keys = {};
+document.addEventListener('keydown', e => {
+  keys[e.key] = true;
+  if (!player) return;
+  const map2 = { ArrowLeft:'left', ArrowRight:'right', ArrowUp:'up', ArrowDown:'down',
+                  a:'left', d:'right', w:'up', s:'down',
+                  A:'left', D:'right', W:'up', S:'down' };
+  const dir = map2[e.key];
+  if (dir) {
+    e.preventDefault();
+    if (dir === 'left')  { player.nextDx = -1; player.nextDy = 0; }
+    if (dir === 'right') { player.nextDx = 1;  player.nextDy = 0; }
+    if (dir === 'up')    { player.nextDx = 0;  player.nextDy = -1; }
+    if (dir === 'down')  { player.nextDx = 0;  player.nextDy = 1; }
+  }
+});
+document.addEventListener('keyup', e => { keys[e.key] = false; });
+
+// Touch / swipe support
+let touchStartX = 0, touchStartY = 0;
+canvas.addEventListener('touchstart', e => {
+  touchStartX = e.touches[0].clientX;
+  touchStartY = e.touches[0].clientY;
+  e.preventDefault();
+}, {passive: false});
+canvas.addEventListener('touchend', e => {
+  const dx = e.changedTouches[0].clientX - touchStartX;
+  const dy = e.changedTouches[0].clientY - touchStartY;
+  if (!player) return;
+  if (Math.abs(dx) > Math.abs(dy)) {
+    if (dx > 20) { player.nextDx = 1; player.nextDy = 0; }
+    else if (dx < -20) { player.nextDx = -1; player.nextDy = 0; }
+  } else {
+    if (dy > 20) { player.nextDx = 0; player.nextDy = 1; }
+    else if (dy < -20) { player.nextDx = 0; player.nextDy = -1; }
+  }
+  e.preventDefault();
+}, {passive: false});
+
+function canMove(col, row) {
+  if (row < 0 || row >= ROWS || col < 0 || col >= COLS) return false;
+  const v = map[row][col];
+  return v !== 1;
+}
+
+function canMoveGhost(col, row) {
+  if (row < 0 || row >= ROWS || col < 0 || col >= COLS) return false;
+  return map[row][col] !== 1;
+}
+
+let lastTime = 0;
+function gameLoop(ts = 0) {
+  const dt = Math.min((ts - lastTime) / 1000, 0.05);
+  lastTime = ts;
+  update(dt);
+  draw();
+  if (gameState === 'playing') {
+    animFrame = requestAnimationFrame(gameLoop);
+  }
+}
+
+function update(dt) {
+  if (gameState !== 'playing') return;
+
+  // Power timer
+  if (scared && powerTimer > 0) {
+    powerTimer -= dt;
+    if (powerTimer <= 0) { scared = false; }
+  }
+
+  // Update player
+  updatePlayer(dt);
+
+  // Update ghosts
+  for (let g of ghosts) updateGhost(g, dt);
+
+  // Dot/item collection
+  const col = Math.round(player.px / TILE);
+  const row = Math.round(player.py / TILE);
+  if (row >= 0 && row < ROWS && col >= 0 && col < COLS) {
+    if (map[row][col] === 0) {
+      map[row][col] = 2;
+      score += 10;
+    } else if (map[row][col] === 3) {
+      map[row][col] = 2;
+      score += 50;
+      scared = true;
+      powerTimer = 8;
+    }
+  }
+
+  // Item collection
+  for (let item of items) {
+    if (!item.collected && Math.abs(item.x - col) < 1 && Math.abs(item.y - row) < 1) {
+      item.collected = true;
+      score += 50; // Bror elsker å stjele ting!
+      
+      showItemEat(item.emoji);
+    }
+  }
+
+  // Ghost collision
+  for (let g of ghosts) {
+    const gcol = Math.round(g.px / TILE);
+    const grow = Math.round(g.py / TILE);
+    if (Math.abs(g.px - player.px) < TILE * 0.75 && Math.abs(g.py - player.py) < TILE * 0.75) {
+      if (scared) {
+        // eat ghost
+        g.px = 9 * TILE; g.py = 9 * TILE;
+        g.x = 9; g.y = 9;
+        score += 200;
+        scared = false;
+      } else {
+        loseLife();
+        return;
+      }
+    }
+  }
+
+  // Win check
+  let dotsLeft = 0;
+  for (let r of map) for (let v of r) if (v === 0 || v === 3) dotsLeft++;
+  if (dotsLeft === 0 && items.every(i => i.collected)) {
+    nextLevel();
+  }
+
+  // Update HUD
+  document.getElementById('scoreDisplay').textContent = score;
+  document.getElementById('levelDisplay').textContent = level;
+  const heartsArr = ['','❤️','❤️❤️','❤️❤️❤️'];
+  document.getElementById('livesDisplay').textContent = heartsArr[Math.max(0, Math.min(3, lives))] || '';
+}
+
+let itemEatMessage = null;
+let itemEatTimer = 0;
+function showItemEat(emoji) {
+  itemEatMessage = `+50 😈 ${emoji}`;
+  itemEatTimer = 2;
+}
+
+function loseLife() {
+  lives--;
+  if (lives <= 0) {
+    gameOver();
+  } else {
+    // Reset positions
+    player.px = 10 * TILE; player.py = 16 * TILE;
+    player.dx = 0; player.dy = 0;
+    player.nextDx = 0; player.nextDy = 0;
+    for (let g of ghosts) { g.px = 9*TILE+2; g.py = 9*TILE+2; }
+    scared = false; powerTimer = 0;
+  }
+}
+
+function gameOver() {
+  gameState = 'over';
+  const ov = document.getElementById('overlay');
+  ov.style.display = 'flex';
+  ov.innerHTML = `
+    <h2>GAME OVER 😢</h2>
+    <p>SCORE: ${score}<br><br>Bror ble tatt!</p>
+    <button id="startBtn" onclick="startGame()" style="background:#f5c842;color:#000;border:none;font-family:'Press Start 2P',monospace;font-size:11px;padding:14px 28px;cursor:pointer;">PRØV IGJEN</button>
+  `;
+}
+
+function nextLevel() {
+  level++;
+  map = copyMap();
+  initEntities();
+}
+
+function updatePlayer(dt) {
+  const p = player;
+  p.moveTimer += dt;
+  const interval = 1 / (p.speed * 4 + level * 0.5);
+
+  // Try next direction
+  if (p.nextDx !== 0 || p.nextDy !== 0) {
+    const nc = Math.round(p.px / TILE) + p.nextDx;
+    const nr = Math.round(p.py / TILE) + p.nextDy;
+    if (canMove(nc, nr)) {
+      p.dx = p.nextDx;
+      p.dy = p.nextDy;
+    }
+  }
+
+  if (p.moveTimer >= interval) {
+    p.moveTimer = 0;
+    const nc = Math.round(p.px / TILE) + p.dx;
+    const nr = Math.round(p.py / TILE) + p.dy;
+    if ((p.dx !== 0 || p.dy !== 0) && canMove(nc, nr)) {
+      p.px = nc * TILE;
+      p.py = nr * TILE;
+      // Tunnel wrap
+      if (p.px < 0) p.px = (COLS - 1) * TILE;
+      if (p.px >= COLS * TILE) p.px = 0;
+    }
+  }
+
+  // Mouth animation
+  p.mouthAngle += p.mouthDir * dt * 5;
+  if (p.mouthAngle > 0.4) { p.mouthAngle = 0.4; p.mouthDir = -1; }
+  if (p.mouthAngle < 0.0) { p.mouthAngle = 0.0; p.mouthDir = 1; }
+
+  if (p.dx === 1)  p.facing = 0;
+  if (p.dx === -1) p.facing = Math.PI;
+  if (p.dy === -1) p.facing = -Math.PI / 2;
+  if (p.dy === 1)  p.facing = Math.PI / 2;
+
+  if (itemEatTimer > 0) itemEatTimer -= dt;
+}
+
+function updateGhost(g, dt) {
+  g.moveTimer += dt;
+  const interval = 1 / (g.speed * 4);
+  if (g.moveTimer < interval) return;
+  g.moveTimer = 0;
+
+  const gc = Math.round(g.px / TILE);
+  const gr = Math.round(g.py / TILE);
+
+  // Simple AI: try to move towards/away from player
+  const pc = Math.round(player.px / TILE);
+  const pr = Math.round(player.py / TILE);
+
+  const dirs = [{dx:1,dy:0},{dx:-1,dy:0},{dx:0,dy:1},{dx:0,dy:-1}];
+  // Remove reverse direction
+  const valid = dirs.filter(d => {
+    if (d.dx === -g.dx && d.dy === -g.dy) return false;
+    return canMoveGhost(gc + d.dx, gr + d.dy);
+  });
+
+  if (valid.length === 0) {
+    // forced reverse
+    const rev = {dx: -g.dx, dy: -g.dy};
+    if (canMoveGhost(gc + rev.dx, gr + rev.dy)) {
+      g.dx = rev.dx; g.dy = rev.dy;
+    }
+  } else if (valid.length === 1) {
+    g.dx = valid[0].dx; g.dy = valid[0].dy;
+  } else {
+    // Score directions by distance to player
+    valid.forEach(d => {
+      const nc = gc + d.dx, nr = gr + d.dy;
+      const dist = Math.abs(nc - pc) + Math.abs(nr - pr);
+      d.dist = scared ? dist : -dist; // flee if scared
+    });
+    valid.sort((a, b) => a.dist - b.dist);
+    // Add some randomness
+    const top = valid.slice(0, Math.min(2, valid.length));
+    const chosen = top[Math.floor(Math.random() * top.length)];
+    g.dx = chosen.dx; g.dy = chosen.dy;
+  }
+
+  const nc = gc + g.dx, nr = gr + g.dy;
+  if (canMoveGhost(nc, nr)) {
+    g.px = nc * TILE;
+    g.py = nr * TILE;
+    if (g.px < 0) g.px = (COLS - 1) * TILE;
+    if (g.px >= COLS * TILE) g.px = 0;
+  }
+}
+
+// ---- DRAWING ----
+
+function draw() {
+  ctx.fillStyle = '#000014';
+  ctx.fillRect(0, 0, W, H);
+
+  drawMaze();
+  drawItems();
+  drawPlayer();
+  for (let g of ghosts) drawGhost(g);
+
+  if (itemEatMessage && itemEatTimer > 0) {
+    ctx.save();
+    ctx.globalAlpha = Math.min(1, itemEatTimer);
+    ctx.font = '12px "Press Start 2P"';
+    ctx.fillStyle = '#44dd44';
+    ctx.textAlign = 'center';
+    ctx.fillText(itemEatMessage, player.px + TILE/2, player.py - 10);
+    ctx.restore();
+  }
+}
+
+function drawMaze() {
+  for (let row = 0; row < ROWS; row++) {
+    for (let col = 0; col < COLS; col++) {
+      const v = map[row][col];
+      const x = col * TILE, y = row * TILE;
+
+      if (v === 1) {
+        // Pixel-art wall
+        ctx.fillStyle = '#0a2a6e';
+        ctx.fillRect(x, y, TILE, TILE);
+        ctx.fillStyle = '#1a3a8e';
+        ctx.fillRect(x+1, y+1, TILE-2, TILE-2);
+        ctx.fillStyle = '#0d2050';
+        ctx.fillRect(x, y, TILE, 2);
+        ctx.fillRect(x, y, 2, TILE);
+      } else if (v === 0) {
+        // Dot
+        ctx.fillStyle = '#e8d8b0';
+        ctx.fillRect(x + TILE/2 - 2, y + TILE/2 - 2, 4, 4);
+      } else if (v === 3) {
+        // Power pellet - pulsing
+        const pulse = 0.5 + 0.5 * Math.sin(Date.now() / 200);
+        ctx.fillStyle = `rgba(255, 220, 100, ${0.7 + 0.3 * pulse})`;
+        const r = 4 + pulse * 2;
+        ctx.beginPath();
+        ctx.arc(x + TILE/2, y + TILE/2, r, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+  }
+}
+
+function drawItems() {
+  const S = 2;
+  const n = null;
+  const SPRITES = {
+    '🍇': [
+      [n,n,'#6a0dad','#8b2be2','#6a0dad',n,'#6a0dad','#8b2be2','#6a0dad',n,n,n],
+      [n,'#6a0dad','#c8a0e0','#8b2be2','#6a0dad','#6a0dad','#c8a0e0','#8b2be2','#6a0dad',n,n,n],
+      [n,'#6a0dad','#8b2be2','#6a0dad','#6a0dad','#6a0dad','#8b2be2','#6a0dad','#6a0dad',n,n,n],
+      [n,n,'#6a0dad','#6a0dad',n,n,'#6a0dad','#6a0dad',n,n,n,n],
+      [n,n,n,n,n,'#006400','#228B22',n,n,n,n,n],
+      [n,n,n,n,'#006400','#228B22','#006400',n,n,n,n,n],
+      [n,n,'#6a0dad','#8b2be2','#6a0dad',n,'#6a0dad','#8b2be2','#6a0dad',n,n,n],
+      ['#6a0dad','#8b2be2','#c8a0e0','#8b2be2','#6a0dad','#6a0dad','#c8a0e0','#8b2be2','#6a0dad','#6a0dad',n,n],
+      ['#6a0dad','#8b2be2','#6a0dad','#6a0dad','#6a0dad','#6a0dad','#8b2be2','#6a0dad','#6a0dad','#6a0dad',n,n],
+      [n,'#6a0dad','#6a0dad',n,'#6a0dad','#6a0dad','#6a0dad',n,'#6a0dad',n,n,n],
+      [n,n,n,n,n,n,n,n,n,n,n,n],
+      [n,n,n,n,n,n,n,n,n,n,n,n],
+    ],
+    '📚': [
+      [n,'#cc2200','#cc2200','#cc2200','#cc2200','#cc2200','#cc2200','#cc2200',n,n,n,n],
+      ['#cc2200','#ee4422','#ffffff','#ffffff','#ffffff','#ffffff','#ffffff','#ee4422','#cccccc',n,n,n],
+      ['#cc2200','#ee4422','#ffffff','#440000','#440000','#440000','#ffffff','#ee4422','#cccccc',n,n,n],
+      ['#cc2200','#ee4422','#ffffff','#ffffff','#ffffff','#ffffff','#ffffff','#ee4422','#cccccc',n,n,n],
+      ['#cc2200','#ee4422','#ffffff','#440000','#ffffff','#ffffff','#ffffff','#ee4422','#cccccc',n,n,n],
+      ['#cc2200','#ee4422','#ffffff','#ffffff','#ffffff','#ffffff','#ffffff','#ee4422','#cccccc',n,n,n],
+      ['#cc2200','#ee4422','#ffffff','#440000','#440000','#ffffff','#ffffff','#ee4422','#cccccc',n,n,n],
+      ['#cc2200','#ee4422','#ee4422','#ee4422','#ee4422','#ee4422','#ee4422','#ee4422','#cccccc',n,n,n],
+      [n,'#cc2200','#cc2200','#cc2200','#cc2200','#cc2200','#cc2200','#cc2200',n,n,n,n],
+      [n,n,n,n,n,n,n,n,n,n,n,n],
+      [n,n,n,n,n,n,n,n,n,n,n,n],
+      [n,n,n,n,n,n,n,n,n,n,n,n],
+    ],
+    '🪥': [
+      [n,n,n,n,'#dddddd','#ffffff','#dddddd',n,n,n,n,n],
+      [n,n,n,'#bbbbbb','#ffffff','#ffffff','#ffffff','#bbbbbb',n,n,n,n],
+      [n,n,n,'#bbbbbb','#ffffff','#ffffff','#ffffff','#bbbbbb',n,n,n,n],
+      [n,n,n,'#bbbbbb','#ffffff','#ffffff','#ffffff','#bbbbbb',n,n,n,n],
+      [n,n,n,'#bbbbbb','#ffffff','#ffffff','#ffffff','#bbbbbb',n,n,n,n],
+      [n,n,n,'#bbbbbb','#ffffff','#ffffff','#ffffff','#bbbbbb',n,n,n,n],
+      [n,n,n,'#bbbbbb','#ffffff','#ffffff','#ffffff','#bbbbbb',n,n,n,n],
+      [n,n,n,n,'#bbbbbb','#dddddd','#bbbbbb',n,n,n,n,n],
+      [n,n,n,n,'#999999',n,n,n,n,n,n,n],
+      [n,n,n,'#999999',n,n,n,n,n,n,n,n],
+      [n,n,'#999999',n,n,n,n,n,n,n,n,n],
+      [n,'#999999',n,n,n,n,n,n,n,n,n,n],
+    ],
+    '🥡': [
+      [n,n,'#dddddd','#dddddd','#dddddd','#dddddd','#dddddd','#dddddd',n,n,n,n],
+      [n,'#ffffff','#ffffff','#ffffff','#ffffff','#ffffff','#ffffff','#ffffff','#ffffff',n,n,n],
+      ['#dddddd','#ee3300','#ee3300','#ee3300','#ee3300','#ee3300','#ee3300','#ee3300','#ee3300','#dddddd',n,n],
+      ['#dddddd','#ffffff','#ffffff','#ffffff','#ffffff','#ffffff','#ffffff','#ffffff','#ffffff','#dddddd',n,n],
+      ['#dddddd','#ffffff','#ffffff','#ffffff','#ffffff','#ffffff','#ffffff','#ffffff','#ffffff','#dddddd',n,n],
+      ['#dddddd','#ffffff','#ffffff','#ffffff','#ffffff','#ffffff','#ffffff','#ffffff','#ffffff','#dddddd',n,n],
+      ['#dddddd','#dddddd','#dddddd','#dddddd','#dddddd','#dddddd','#dddddd','#dddddd','#dddddd','#dddddd',n,n],
+      [n,'#bbbbbb','#bbbbbb','#bbbbbb','#bbbbbb','#bbbbbb','#bbbbbb','#bbbbbb','#bbbbbb',n,n,n],
+      [n,n,n,n,n,n,n,n,n,n,n,n],
+      [n,n,n,n,n,n,n,n,n,n,n,n],
+      [n,n,n,n,n,n,n,n,n,n,n,n],
+      [n,n,n,n,n,n,n,n,n,n,n,n],
+    ],
+    '🛋️': [
+      [n,'#4466cc','#4466cc','#4466cc','#4466cc','#4466cc','#4466cc','#4466cc','#4466cc',n,n,n],
+      ['#4466cc','#6688ee','#6688ee','#6688ee','#6688ee','#6688ee','#6688ee','#6688ee','#6688ee','#4466cc',n,n],
+      ['#4466cc','#6688ee','#8899ff','#6688ee','#6688ee','#6688ee','#8899ff','#6688ee','#6688ee','#4466cc',n,n],
+      ['#4466cc','#6688ee','#6688ee','#8899ff','#6688ee','#8899ff','#6688ee','#6688ee','#6688ee','#4466cc',n,n],
+      ['#4466cc','#6688ee','#6688ee','#6688ee','#8899ff','#6688ee','#6688ee','#6688ee','#6688ee','#4466cc',n,n],
+      ['#4466cc','#6688ee','#6688ee','#8899ff','#6688ee','#8899ff','#6688ee','#6688ee','#6688ee','#4466cc',n,n],
+      ['#4466cc','#6688ee','#8899ff','#6688ee','#6688ee','#6688ee','#8899ff','#6688ee','#6688ee','#4466cc',n,n],
+      ['#4466cc','#6688ee','#6688ee','#6688ee','#6688ee','#6688ee','#6688ee','#6688ee','#6688ee','#4466cc',n,n],
+      [n,'#4466cc','#4466cc','#4466cc','#4466cc','#4466cc','#4466cc','#4466cc','#4466cc',n,n,n],
+      [n,n,n,n,n,n,n,n,n,n,n,n],
+      [n,n,n,n,n,n,n,n,n,n,n,n],
+      [n,n,n,n,n,n,n,n,n,n,n,n],
+    ],
+  };
+
+  for (let item of items) {
+    if (item.collected) continue;
+    const cx = item.x * TILE + TILE/2;
+    const cy = item.y * TILE + TILE/2;
+    const spr = SPRITES[item.emoji];
+    if (!spr) continue;
+    const ox = Math.round(cx - 6 * S);
+    const oy = Math.round(cy - 6 * S);
+    for (let r = 0; r < 12; r++) {
+      for (let c = 0; c < 12; c++) {
+        const col = spr[r][c];
+        if (!col) continue;
+        ctx.fillStyle = col;
+        ctx.fillRect(ox + c * S, oy + r * S, S, S);
+      }
+    }
+  }
+}
+
+function drawPlayer() {
+  const p = player;
+  const cx = p.px + TILE/2;
+  const cy = p.py + TILE/2;
+
+  if (scared) {
+    ctx.fillStyle = 'rgba(255,200,0,0.25)';
+    ctx.beginPath();
+    ctx.arc(cx, cy, TILE, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  const S = 2; // each logical pixel = 2 screen pixels
+  const COLS = 16, ROWS = 16;
+  const ox = Math.round(cx - (COLS / 2) * S);
+  const oy = Math.round(cy - (ROWS / 2) * S);
+
+  const K = '#2a1500'; // dark outline
+  const G = '#d4914a'; // golden fur
+  const L = '#eab878'; // light fur
+  const D = '#7a4010'; // dark ear
+  const W = '#ffffff'; // eye white
+  const B = '#180800'; // eye pupil
+  const P = '#e08888'; // pink nose
+  const n = null;
+
+  // 16x16 sprite - front-facing dog like the reference image
+  const SPR = [
+    [n,n,n,K,K,K,K,K,K,K,K,K,K,n,n,n],
+    [n,n,K,G,G,G,L,L,L,L,G,G,G,K,n,n],
+    [n,K,D,D,K,G,L,L,L,L,G,K,D,D,K,n],
+    [K,D,D,D,K,G,G,G,G,G,G,K,D,D,D,K],
+    [K,D,D,D,K,G,G,G,G,G,G,K,D,D,D,K],
+    [n,K,D,D,K,G,G,G,G,G,G,K,D,D,K,n],
+    [n,n,K,K,G,G,G,G,G,G,G,G,K,K,n,n],
+    [n,n,K,G,G,K,B,B,G,B,B,K,G,G,K,n],
+    [n,n,K,G,G,K,B,W,G,W,B,K,G,G,K,n],
+    [n,n,K,G,G,K,K,K,G,K,K,K,G,G,K,n],
+    [n,n,K,G,G,G,G,G,G,G,G,G,G,G,K,n],
+    [n,n,K,G,G,G,K,P,P,K,G,G,G,G,K,n],
+    [n,n,n,K,G,G,K,P,P,K,G,G,G,K,n,n],
+    [n,n,n,K,G,G,K,K,K,K,G,G,G,K,n,n],
+    [n,n,n,n,K,G,G,G,G,G,G,G,K,n,n,n],
+    [n,n,n,n,n,K,K,K,K,K,K,K,n,n,n,n],
+  ];
+
+  for (let row = 0; row < ROWS; row++) {
+    for (let col = 0; col < COLS; col++) {
+      const c = SPR[row][col];
+      if (!c) continue;
+      ctx.fillStyle = c;
+      ctx.fillRect(ox + col * S, oy + row * S, S, S);
+    }
+  }
+}
+
+function drawGhost(g) {
+  const cx = g.px + TILE / 2;
+  const cy = g.py + TILE / 2;
+  const S = 2;
+  const n = null;
+  const isEier = g.name === 'JULIE';
+
+  const SK = '#f5c89a'; const SKD = '#d4a070'; const K = '#1a0a00';
+  const W = '#ffffff';  const EY = '#221100'; const LIP = '#c07060';
+  const HB = '#3a1800'; const HL = '#c89050';
+  const CAP = '#228822'; const CB = '#115511';
+
+  // EIER: man with red cap and short dark hair
+  const EIER_SPR = [
+    [n,  n,  n,  CAP,CAP,CAP,CAP,CAP,CAP, n,  n,  n],
+    [n,  n,  CB, CB, CAP,CAP,CAP,CAP,CB,  CB, n,  n],
+    [n,  CB, CB, CB, CB, CB, CB, CB, CB,  CB, CB, n],
+    [n,  n,  HB, HB, SK, SK, SK, SK, HB,  HB, n,  n],
+    [n,  n,  SK, SK, SK, SK, SK, SK, SK,  SK, n,  n],
+    [n,  n,  SK, EY, EY, SK, SK, EY, EY,  SK, n,  n],
+    [n,  n,  SK, EY, W,  SK, SK, W,  EY,  SK, n,  n],
+    [n,  n,  SK, SK, SK, SK, SK, SK, SK,  SK, n,  n],
+    [n,  n,  SK, SKD,SKD,SKD,SKD,SKD,SK,  SK, n,  n],
+    [n,  n,  SK, SK, LIP,LIP,LIP,LIP,SK,  SK, n,  n],
+    [n,  n,  n,  SK, SK, SK, SK, SK, SK,  n,  n,  n],
+    [n,  n,  n,  n,  K,  K,  K,  K,  n,   n,  n,  n],
+  ];
+
+  // SAMBOER: woman with long light brown hair
+  const SAMBOER_SPR = [
+    [n,  n,  HL, HL, HL, HL, HL, HL, HL, n,  n,  n],
+    [n,  HL, HL, HL, SK, SK, SK, SK, HL, HL, n,  n],
+    [n,  HL, SK, SK, SK, SK, SK, SK, SK, SK, HL, n],
+    [n,  HL, SK, EY, EY, SK, SK, EY, EY, SK, HL, n],
+    [n,  HL, SK, EY, W,  SK, SK, W,  EY, SK, HL, n],
+    [n,  HL, SK, SK, SK, SK, SK, SK, SK, SK, HL, n],
+    [n,  HL, SK, SKD,SKD,SKD,SKD,SKD,SK, SK, HL, n],
+    [n,  HL, SK, SK, LIP,LIP,LIP,SK, SK, SK, HL, n],
+    [n,  HL, HL, SK, SK, SK, SK, SK, HL, HL, n,  n],
+    [n,  HL, HL, HL, n,  n,  n,  HL, HL, HL, n,  n],
+    [n,  HL, HL, n,  n,  n,  n,  n,  HL, HL, n,  n],
+    [n,  n,  n,  n,  K,  K,  K,  K,  n,  n,  n,  n],
+  ];
+
+  const SPR = isEier ? EIER_SPR : SAMBOER_SPR;
+  const ROWS = 12, COLS = 12;
+  const ox = Math.round(cx - (COLS / 2) * S);
+  const oy = Math.round(cy - (ROWS / 2) * S);
+
+  for (let row = 0; row < ROWS; row++) {
+    for (let col = 0; col < COLS; col++) {
+      const c = SPR[row][col];
+      if (!c) continue;
+      ctx.fillStyle = scared ? shiftBlue(c) : c;
+      ctx.fillRect(ox + col * S, oy + row * S, S, S);
+    }
+  }
+
+  ctx.font = '5px "Press Start 2P"';
+  ctx.fillStyle = scared ? '#88aaff' : '#ffff88';
+  ctx.textAlign = 'center';
+  ctx.fillText(g.name, cx, cy - 13);
+}
+
+function shiftBlue(hex) {
+  try {
+    const r = parseInt(hex.slice(1,3),16);
+    const g = parseInt(hex.slice(3,5),16);
+    const b = parseInt(hex.slice(5,7),16);
+    return `rgb(${Math.floor(r*0.3)},${Math.floor(g*0.3)},${Math.min(255,Math.floor(b*0.5+120))})`;
+  } catch(e) { return hex; }
+}
+</script>
+</body>
+</html>
